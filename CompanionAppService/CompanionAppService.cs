@@ -650,18 +650,18 @@ namespace EddiCompanionAppService
 
             Ship.json = json.ToString(Formatting.None);
 
-            Ship.LocalId = json["id"];
+            Ship.LocalId = (int)json["id"];
 
             // Some ship information is just skeleton data of the ship's ID.  Use value as our canary to see if there is more data
             if (json["value"] != null)
             {
                 Ship.value = (long)json["value"]["hull"] + (long)json["value"]["modules"];
 
-                Ship.cargocapacity = (int)json["cargo"]["capacity"];
-                Ship.cargocarried = (int)json["cargo"]["qty"];
+                Ship.cargocapacity = (int)(json["cargo"]?["capacity"] ?? 0);
+                Ship.cargocarried = (int)(json["cargo"]?["qty"] ?? 0);
 
                 // Be sensible with health - round it unless it's very low
-                decimal Health = (decimal)json["health"]["hull"] / 10000;
+                decimal Health = json["health"] == null ? 0m : (decimal)json["health"]["hull"] / 10000;
                 if (Health < 5)
                 {
                     Ship.health = Math.Round(Health, 1);
@@ -671,73 +671,76 @@ namespace EddiCompanionAppService
                     Ship.health = Math.Round(Health);
                 }
 
-                // Obtain the internals
-                Ship.bulkheads = ModuleFromProfile("Armour", json["modules"]["Armour"]);
-                Ship.powerplant = ModuleFromProfile("PowerPlant", json["modules"]["PowerPlant"]);
-                Ship.thrusters = ModuleFromProfile("MainEngines", json["modules"]["MainEngines"]);
-                Ship.frameshiftdrive = ModuleFromProfile("FrameShiftDrive", json["modules"]["FrameShiftDrive"]);
-                Ship.lifesupport = ModuleFromProfile("LifeSupport", json["modules"]["LifeSupport"]);
-                Ship.powerdistributor = ModuleFromProfile("PowerDistributor", json["modules"]["PowerDistributor"]);
-                Ship.sensors = ModuleFromProfile("Radar", json["modules"]["Radar"]);
-                Ship.fueltank = ModuleFromProfile("FuelTank", json["modules"]["FuelTank"]);
-                Ship.fueltankcapacity = (decimal)Math.Pow(2, Ship.fueltank.@class);
-                Ship.fueltanktotalcapacity = (decimal)json["fuel"]["main"]["capacity"];
-
-                // Obtain the hardpoints.  Hardpoints can come in any order so first parse them then second put them in the correct order
-                Dictionary<string, Hardpoint> hardpoints = new Dictionary<string, Hardpoint>();
-                foreach (JProperty module in json["modules"])
+                if (json["modules"] != null)
                 {
-                    if (module.Name.Contains("Hardpoint"))
-                    {
-                        hardpoints.Add(module.Name, HardpointFromProfile(module));
-                    }
-                }
+                    // Obtain the internals
+                    Ship.bulkheads = ModuleFromProfile("Armour", json["modules"]["Armour"]);
+                    Ship.powerplant = ModuleFromProfile("PowerPlant", json["modules"]["PowerPlant"]);
+                    Ship.thrusters = ModuleFromProfile("MainEngines", json["modules"]["MainEngines"]);
+                    Ship.frameshiftdrive = ModuleFromProfile("FrameShiftDrive", json["modules"]["FrameShiftDrive"]);
+                    Ship.lifesupport = ModuleFromProfile("LifeSupport", json["modules"]["LifeSupport"]);
+                    Ship.powerdistributor = ModuleFromProfile("PowerDistributor", json["modules"]["PowerDistributor"]);
+                    Ship.sensors = ModuleFromProfile("Radar", json["modules"]["Radar"]);
+                    Ship.fueltank = ModuleFromProfile("FuelTank", json["modules"]["FuelTank"]);
+                    Ship.fueltankcapacity = (decimal)Math.Pow(2, Ship.fueltank.@class);
+                    Ship.fueltanktotalcapacity = (decimal)(json["fuel"]?["main"]?["capacity"] ?? 0m);
 
-                foreach (string size in HARDPOINT_SIZES)
-                {
-                    for (int i = 1; i < 12; i++)
+                    // Obtain the hardpoints.  Hardpoints can come in any order so first parse them then second put them in the correct order
+                    Dictionary<string, Hardpoint> hardpoints = new Dictionary<string, Hardpoint>();
+                    foreach (JProperty module in json["modules"])
                     {
-                        Hardpoint hardpoint;
-                        hardpoints.TryGetValue(size + "Hardpoint" + i, out hardpoint);
-                        if (hardpoint != null)
+                        if (module.Name.Contains("Hardpoint"))
                         {
-                            Ship.hardpoints.Add(hardpoint);
+                            hardpoints.Add(module.Name, HardpointFromProfile(module));
                         }
                     }
-                }
 
-                // Obtain the compartments
-                foreach (dynamic module in json["modules"])
-                {
-                    if (module.Name.Contains("Slot"))
+                    foreach (string size in HARDPOINT_SIZES)
                     {
-                        Ship.compartments.Add(CompartmentFromProfile(module));
-                    }
-                }
-
-                // Obtain the cargo
-                Ship.cargo = new List<Cargo>();
-                if (json["cargo"] != null && json["cargo"]["items"] != null)
-                {
-                    foreach (dynamic cargoJson in json["cargo"]["items"])
-                    {
-                        if (cargoJson != null && cargoJson["commodity"] != null)
+                        for (int i = 1; i < 12; i++)
                         {
-                            string name = (string)cargoJson["commodity"];
-                            Cargo cargo = new Cargo();
-                            cargo.commodity = CommodityDefinitions.FromName(name);
-                            if (cargo.commodity.name == null)
+                            Hardpoint hardpoint;
+                            hardpoints.TryGetValue(size + "Hardpoint" + i, out hardpoint);
+                            if (hardpoint != null)
                             {
-                                // Unknown commodity; log an error so that we can update the definitions
-                                Logging.Error("No commodity definition for cargo", cargoJson.ToString(Formatting.None));
-                                cargo.commodity.name = name;
+                                Ship.hardpoints.Add(hardpoint);
                             }
-                            cargo.amount = (int)cargoJson["qty"];
-                            cargo.price = (long)cargoJson["value"] / cargo.amount;
-                            cargo.missionid = (long?)cargoJson["mission"];
-                            cargo.stolen = ((int?)(long?)cargoJson["marked"]) == 1;
+                        }
+                    }
 
-                            Ship.cargo.Add(cargo);
+                    // Obtain the compartments
+                    foreach (dynamic module in json["modules"])
+                    {
+                        if (module.Name.Contains("Slot"))
+                        {
+                            Ship.compartments.Add(CompartmentFromProfile(module));
+                        }
+                    }
+
+                    // Obtain the cargo
+                    Ship.cargo = new List<Cargo>();
+                    if (json["cargo"] != null && json["cargo"]["items"] != null)
+                    {
+                        foreach (dynamic cargoJson in json["cargo"]["items"])
+                        {
+                            if (cargoJson != null && cargoJson["commodity"] != null)
+                            {
+                                string name = (string)cargoJson["commodity"];
+                                Cargo cargo = new Cargo();
+                                cargo.commodity = CommodityDefinitions.FromName(name);
+                                if (cargo.commodity.name == null)
+                                {
+                                    // Unknown commodity; log an error so that we can update the definitions
+                                    Logging.Error("No commodity definition for cargo", cargoJson.ToString(Formatting.None));
+                                    cargo.commodity.name = name;
+                                }
+                                cargo.amount = (int)cargoJson["qty"];
+                                cargo.price = (long)cargoJson["value"] / cargo.amount;
+                                cargo.missionid = (long?)cargoJson["mission"];
+                                cargo.stolen = ((int?)(long?)cargoJson["marked"]) == 1;
+
+                                Ship.cargo.Add(cargo);
+                            }
                         }
                     }
                 }
@@ -855,7 +858,7 @@ namespace EddiCompanionAppService
                 {
                     dynamic module = moduleJson.Value;
                     // Not interested in paintjobs, decals, ...
-                    if (module["category"] == "weapon" || module["category"] == "module")
+                    if (module["category"]?.ToString() == "weapon" || module["category"]?.ToString() == "module")
                     {
                         Module Module = ModuleDefinitions.ModuleFromEliteID((long)module["id"]);
                         if (Module.name == null)
@@ -865,7 +868,7 @@ namespace EddiCompanionAppService
                             // Set the name from the JSON
                             Module.EDName = (string)module["name"];
                         }
-                        Module.price = module["cost"];
+                        Module.price = (long)module["cost"];
                         Modules.Add(Module);
                     }
                 }
@@ -883,7 +886,6 @@ namespace EddiCompanionAppService
             {
                 foreach (dynamic commodity in json["lastStarport"]["commodities"])
                 {
-                    dynamic commodityJson = commodity.Value;
                     Commodity Commodity = CommodityDefinitions.CommodityFromEliteID((long)commodity["id"]);
                     if (Commodity == null || Commodity.name == null)
                     {
